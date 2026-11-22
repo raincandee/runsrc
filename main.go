@@ -1,16 +1,19 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-const version = "0.1.0"
+const version = "0.1.1"
 
 type options struct {
-	run bool
+	run   bool
+	local bool
 }
 
 const usageHead = `Usage: runsrc [flags] [lang] <file> [args...]   compile a source file
@@ -20,6 +23,8 @@ const usageHead = `Usage: runsrc [flags] [lang] <file> [args...]   compile a sou
 
 Flags (put them before the file or project):
   -r, --run      run the program after building it; args after the file go to it
+  -l, --local    write the built program beside the source (default)
+      --cache    keep the built program in the cache instead
   -h, --help     show this help
       --version  show the version
 
@@ -41,6 +46,7 @@ Environment:
 Examples:
   runsrc main.cpp               build only; prints how to run it
   runsrc --run main.cpp 1 2 3   build, then run with arguments 1 2 3
+  runsrc --run main.c            build beside the source, then run it
   runsrc rs scratch.txt         compile a Rust file that has no .rs extension
   runsrc --run cargo ~/app -- --port 8080
   runsrc make run               run the "run" target of the Makefile here
@@ -51,7 +57,7 @@ func main() {
 }
 
 func cli(args []string) int {
-	var opts options
+	opts := options{local: true}
 
 parse:
 	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
@@ -66,6 +72,10 @@ parse:
 			return 0
 		case "-r", "--run":
 			opts.run = true
+		case "--cache":
+			opts.local = false
+		case "-l", "--local":
+			opts.local = true
 		case "--":
 			break parse
 		default:
@@ -126,12 +136,27 @@ func runFile(lang *Language, args []string, opts options) int {
 		return fail("cannot create cache directory: %v", err)
 	}
 
+	work, err := workDir(cache, file)
+	if err != nil {
+		return fail("cannot create build directory: %v", err)
+	}
+
 	name := strings.TrimSuffix(filepath.Base(file), filepath.Ext(file))
+	outDir := work
+	if opts.local {
+		outDir = filepath.Dir(file)
+	}
+	bin := filepath.Join(outDir, name)
+
+	if bin == filepath.Clean(file) {
+		return fail("output would overwrite the source file '%s'; rename it or give it an extension", file)
+	}
+
 	c := buildCtx{
 		Src:    file,
 		Name:   name,
-		Cache:  cache,
-		Bin:    filepath.Join(cache, name),
+		Cache:  work,
+		Bin:    bin,
 		CFlags: strings.Fields(cflags()),
 		Python: pythonPath(),
 	}
@@ -231,6 +256,22 @@ func cacheDir() (string, error) {
 		return "", err
 	}
 	dir := filepath.Join(base, "runsrc")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+// workDir returns a build directory for one source file. The hash of the
+// absolute path keeps foo.c in two different projects from sharing output.
+func workDir(cache, src string) (string, error) {
+	abs, err := filepath.Abs(src)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte(abs))
+	name := strings.TrimSuffix(filepath.Base(src), filepath.Ext(src))
+	dir := filepath.Join(cache, name+"-"+hex.EncodeToString(sum[:])[:12])
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
