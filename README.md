@@ -11,7 +11,7 @@ runsrc main.cpp
 runsrc --run main.cpp 1 2
 ```
 
-The first command compiles `main.cpp` and prints the command to run the resulting binary. The second does the same, but also runs it with `1` and `2` as arguments.
+The first command compiles `main.cpp` into `main` in the same directory and prints the command to run it. The second does the same, then runs it with `1` and `2` as arguments.
 
 ## Installation
 
@@ -57,6 +57,8 @@ runsrc --run cargo ~/app -- --port 8080
 | Flag | Description |
 | --- | --- |
 | `-r`, `--run` | Run the program after building |
+| `-l`, `--local` | Write the binary beside the source file (default) |
+| `--cache` | Write the binary to the build cache instead |
 | `-h`, `--help` | Show usage and supported languages |
 | `--version` | Print the version |
 
@@ -96,21 +98,28 @@ This is useful when working with files that have unusual extensions or none at a
 
 ### Notes
 
-- **Java:** The filename needs to match the public class name.
-- **Python:** Uses Nuitka to compile Python into standalone binaries. Install it for the interpreter selected by `RUNSRC_PYTHON` (`pip install nuitka`). Initial compilation may take a while.
+- **Java:** The filename must match the public class name. Class files go to the build cache, and the program runs with `java -cp`.
+- **Kotlin:** The jar is written to the build cache and run with `java -jar`.
+- **Python:** Uses Nuitka to compile Python into standalone binaries. Install it for the interpreter selected by `RUNSRC_PYTHON` (`pip install nuitka`). The first compile can take a while.
 - **NASM:** Currently limited to x86-64 Linux. The entry point must be `_start`.
-- **Make:** Targets are executed immediately, so `--run` has no effect.
+- **Make:** Targets run immediately, so `--run` has no effect.
 
-## Build cache
+## Output and build cache
 
-Compiled binaries are kept in a cache instead of being placed alongside the source files.
+Only the final program is written beside the source file. Intermediate files, such as object files, Java classes, Kotlin jars, and Haskell or Nim build data, go in the build cache.
 
-| Platform | Location |
+Each source file gets its own directory in the cache, named after the file and a short hash of its full path. Two files called `main.c` in different projects never overwrite each other's intermediate output.
+
+With `--cache`, the final program is also written to that directory, and nothing is placed beside the source.
+
+| Platform | Cache location |
 | --- | --- |
 | Linux | `$XDG_CACHE_HOME/runsrc` (usually `~/.cache/runsrc`) |
 | macOS | `~/Library/Caches/runsrc` |
 
-Cache entries are identified by the source filename, not its full path. This means two files with the same basename will share an entry, and building one will overwrite the other.
+The cache is never cleaned up automatically. To clear it, delete the directory above.
+
+If you build files inside a git repository, add the output names to `.gitignore`.
 
 ## Exit codes
 
